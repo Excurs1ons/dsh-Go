@@ -43,7 +43,10 @@ android {
     }
 
     defaultConfig {
-        applicationId = "io.github.ccch1mneyyy.dsh_app"
+        // Experimental build: a distinct applicationId so it installs beside the
+        // release app. The Kotlin `namespace` above stays the same — it is
+        // compile-time only and renaming it would move every source directory.
+        applicationId = "io.github.ccch1mneyyy.dsh_app.exp"
         // java.nio.file (symlinks while unpacking the rootfs) needs API 26.
         minSdk = 26
         // Target 28 like Termux, so the API 29+ exec restriction on app-private

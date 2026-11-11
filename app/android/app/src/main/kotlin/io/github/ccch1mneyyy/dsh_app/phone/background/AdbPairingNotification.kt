@@ -24,7 +24,7 @@ object AdbPairingNotification {
     const val CHANNEL_ID = "dsh_phone_pairing"
     const val NOTIFICATION_ID = 0x05D4
     const val CODE_KEY = "dsh_pairing_code"
-    private const val ACTION_SUBMIT = "io.github.ccch1mneyyy.dsh_app.PHONE_ADB_PAIR_CODE"
+    private const val ACTION_SUBMIT = "io.github.ccch1mneyyy.dsh_app.exp.PHONE_ADB_PAIR_CODE"
 
     fun show(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
