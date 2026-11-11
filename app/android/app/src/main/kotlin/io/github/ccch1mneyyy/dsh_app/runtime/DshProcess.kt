@@ -79,7 +79,7 @@ class DshProcess(
      * [binds] are extra proot `-b host:guest` mounts, inserted before the guest command.
      * [safe] boots the rescue profile instead of `web` (see [SafeMode.profileArg]).
      */
-    fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
+    fun start(guestEnv: Map<String, String>, binds: List<String> = emptyList(), safe: Boolean = false, phone: Boolean = false, directEngine: Boolean = false, directFailed: Boolean = false, searchOverlay: Boolean = false, authOverlay: Boolean = false, speechOverlay: Boolean = false, rootLaunch: Boolean = false, onLaunchMethod: ((Boolean) -> Unit)? = null) {
         check(process == null) { "already started" }
         var selection = DirectLaunch.select(rootfs, directEngine, safe, directFailed)
         // Only PRoot's fake hard links stand in Direct's way: tidy them once no runtime process is left.
@@ -164,7 +164,21 @@ class DshProcess(
         env["PROOT_TMP_DIR"] = tmp.absolutePath
         manifest.launchEnv.forEach { (k, v) -> env[k] = expand(v) }
         if (!guestEnvPlaced) env.putAll(effectiveGuestEnv)
-        if (direct) {
+        var rootActive = false
+        if (rootLaunch) {
+            val rootPlan = RootLaunch.plan(rootfs, context.filesDir, argv)
+            if (rootPlan == null) {
+                listener.onLog("[dsh-app] root fallback: the launch command has no env to split; using the compatible launch", "system")
+            } else {
+                // `su` runs the generated script: overlay, real binds, chroot, then the same command.
+                builder.command(listOf("su", "-c", "sh " + rootPlan.script.absolutePath))
+                launchDiagnostics.selected("root", null)
+                env.clear()
+                env["PATH"] = "/system/bin:/system/xbin"
+                rootActive = true
+            }
+        }
+        if (direct && !rootActive) {
             val plan = DirectLaunch.prepare(rootfs, manifest.abi, argv, env.toMap())
             builder.command(plan.argv).directory(plan.cwd)
             env.clear()
@@ -174,7 +188,7 @@ class DshProcess(
         readyReported = false
         if (directFallbackReason == DirectLaunch.INCOMPATIBLE) listener.onLog("[dsh-app] direct fallback: proot hard-link backing files need compatible launch; user preference and data retained", "system")
         if (directFallbackReason == DirectLaunch.FAILED) listener.onLog("[dsh-app] direct fallback: direct launch failed before with this runtime; turn Direct on again to retry", "system")
-        listener.onLog("[dsh-app] launch method: ${if (direct) "direct-glibc" else "proot"}${if (directEngine && safe) " (safe recovery)" else ""}", "system")
+        listener.onLog("[dsh-app] launch method: ${if (rootActive) "root-chroot" else if (direct) "direct-glibc" else "proot"}${if (directEngine && safe) " (safe recovery)" else ""}", "system")
         listener.onLog("[dsh-app] launching ${builder.command().joinToString(" ") { redact(it) }}", "system")
         // stop() came in while this was being prepared: don't launch at all.
         if (stopping) {
@@ -190,6 +204,8 @@ class DshProcess(
         waiter = thread(name = "dsh-wait", isDaemon = true) {
             val code = try { p.waitFor() } catch (_: InterruptedException) { -1 }
             startupSignal.countDown()
+            // Root mode mounted the guest itself; the next start would mount on top of it.
+            if (rootActive) RootLaunch.teardown(File(context.filesDir, "runtime/root-launch.sh"))
             // The fatal message is usually the last output: let the pumps drain it before reporting.
             try {
                 out.join(2000)

@@ -535,20 +535,26 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         worker.execute {
             var launched: DshProcess? = null
             try {
-                noteDns(GuestSetup.writeResolvConf(app, installer.rootfs), DnsConfigSource.START)
+                // Root mode runs against its own copy: never mix the two trees in one start.
+                val rootReady = !safe && launchMode() == LaunchMode.ROOT &&
+                    RootLaunch.detected() &&
+                    RootRuntime.state(app, runCatching { manifest.runtimeVersion }.getOrNull()) == RootRuntime.State.READY
+                RootRuntime.activate(app, if (rootReady) RootRuntime.path(app) else null)
+                val rootfs = RootRuntime.active(app)
+                noteDns(GuestSetup.writeResolvConf(app, rootfs), DnsConfigSource.START)
                 val storage = pendingPhoneStorage && PhoneStorage.isGranted(app) && PhoneStorage.binds().isNotEmpty()
-                PhoneStorage.syncShortcut(installer.rootfs, storage)
+                PhoneStorage.syncShortcut(rootfs, storage)
                 // Phone control: bridge up and guest files written before DSH starts; off in safe mode.
-                val phone = PhoneControl.get(app).prepareLaunch(installer.rootfs, safe) { log(it, "system") }
-                val searchOverlay = !safe && SessionSearchGuest.writeFiles(installer.rootfs)
+                val phone = PhoneControl.get(app).prepareLaunch(rootfs, safe) { log(it, "system") }
+                val searchOverlay = !safe && SessionSearchGuest.writeFiles(rootfs)
                 if (!safe && !searchOverlay) {
                     log("[dsh-app] message search overlay not written; searching matches titles only", "system")
                 }
-                val authOverlay = !safe && AppAuthGuest.writeFiles(app, installer.rootfs)
+                val authOverlay = !safe && AppAuthGuest.writeFiles(app, rootfs)
                 if (!safe && !authOverlay) {
                     log("[dsh-app] subscription sign-in overlay not written; ChatGPT / Claude sign-in is unavailable", "system")
                 }
-                val speechOverlay = !safe && SpeechGuest.writeFiles(installer.rootfs)
+                val speechOverlay = !safe && SpeechGuest.writeFiles(rootfs)
                 if (!safe && !speechOverlay) {
                     log("[dsh-app] voice input overlay not written; the voice model keeps DSH's defaults", "system")
                 }
@@ -559,13 +565,13 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 workspaceRecovery.applyEnvironment(env)
                 PerformancePolicy.applyEngineEnvironment(app, env, manifest.launchArgv, manifest.launchEnv)
                 if (safe) {
-                    SafeMode.prepare(installer.rootfs, briefing())
+                    SafeMode.prepare(rootfs, briefing())
                     env.putAll(SafeMode.GUEST_ENV)
                     bootProfile = null
                     log("[dsh-app] safe mode: booting profile ${SafeMode.PROFILE} rebuilt from the web template, plugins off", "system")
                 } else {
                     bootProfile = try {
-                        LastKnownGood.read(installer.rootfs)
+                        LastKnownGood.read(rootfs)
                     } catch (_: Exception) {
                         null
                     }
@@ -576,7 +582,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 val p = synchronized(this@RuntimeController) {
                     if (stopGen >= gen || gen != runGen) null
                     else DshProcess(
-                        app, manifest, installer.rootfs,
+                        app, manifest, rootfs,
                         object : DshProcess.Listener by this@RuntimeController {
                             override fun onLog(line: String, stream: String, storageLine: String) {
                                 if (stream != "system") {
@@ -601,9 +607,19 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 }
                 timeline.spawned()
                 val direct = directEngine()
-                p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay) { actualDirect ->
+                // The chosen mode decides the Direct half; `auto` keeps the saved switch.
+                val mode = launchMode()
+                val directRequested = when (mode) {
+                    LaunchMode.DIRECT -> true
+                    LaunchMode.AUTO -> direct.requested
+                    else -> false
+                }
+                if (mode == LaunchMode.SHIZUKU) {
+                    log("[dsh-app] shizuku cannot mount or chroot; using the compatible launch", "system")
+                }
+                p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, directRequested, direct.failed, searchOverlay, authOverlay, speechOverlay, rootReady) { actualDirect ->
                     // SafeMode.prepare writes its own briefing; leave the original home untouched.
-                    if (!safe) GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
+                    if (!safe) GuestSetup.writeAgentsMd(rootfs, storage, phone, pendingVisualReplies, actualDirect)
                 }
                 if (phone) PhoneControl.get(app).launched(p.phoneMounted)
             } catch (e: Throwable) {
