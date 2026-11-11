@@ -148,7 +148,6 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         "networkBlocked" to networkAccess.isBlocked,
         "networkBlockedAt" to networkAccess.blockedAt,
         "launchMode" to launchMode().wire,
-        "rootAvailable" to RootLaunch.detected(),
         "rootState" to (rootProbe?.state ?: RootLaunch.State.UNKNOWN).wire,
         "rootDetail" to rootProbe?.detail,
         "rootCopy" to rootCopyState().wire,
@@ -204,10 +203,6 @@ class RuntimeController private constructor(private val app: Context) : DshProce
      * dialog, so the answer arrives through [onDone] and is kept for the status map.
      */
     fun probeRoot(onDone: (RootLaunch.Probe) -> Unit) {
-        if (!RootLaunch.detected()) {
-            onDone(RootLaunch.Probe(RootLaunch.State.UNAVAILABLE))
-            return
-        }
         Thread({
             val probe = RootLaunch.probe()
             rootProbe = probe
@@ -537,7 +532,6 @@ class RuntimeController private constructor(private val app: Context) : DshProce
             try {
                 // Root mode runs against its own copy: never mix the two trees in one start.
                 val rootReady = !safe && launchMode() == LaunchMode.ROOT &&
-                    RootLaunch.detected() &&
                     RootRuntime.state(app, runCatching { manifest.runtimeVersion }.getOrNull()) == RootRuntime.State.READY
                 RootRuntime.activate(app, if (rootReady) RootRuntime.path(app) else null)
                 val rootfs = RootRuntime.active(app)

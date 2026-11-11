@@ -5550,8 +5550,6 @@
   "launchModeRootOverwrite": "重新同步会用兼容模式的系统覆盖 root 系统，里面已有的数据会丢失。",
   "launchModeRootCopied": "root 系统已创建",
   "launchModeRootFailed": "创建 root 系统失败",
-  "launchModeRootDetected": "已检测到 root",
-  "launchModeRootNotDetected": "未检测到 root",
   "launchModeRootAuthorize": "检测 root 授权",
   "launchModeRootAuthorized": "已授权",
   "launchModeRootDenied": "授权被拒绝",

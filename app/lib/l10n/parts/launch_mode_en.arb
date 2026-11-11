@@ -24,8 +24,6 @@
   "launchModeRootOverwrite": "Syncing again overwrites the root system with the compatible one; what it holds is lost.",
   "launchModeRootCopied": "The root system is ready",
   "launchModeRootFailed": "Could not create the root system",
-  "launchModeRootDetected": "Root detected",
-  "launchModeRootNotDetected": "No root manager found",
   "launchModeRootAuthorize": "Check root authorization",
   "launchModeRootAuthorized": "Authorized",
   "launchModeRootDenied": "Authorization denied",

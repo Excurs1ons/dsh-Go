@@ -165,7 +165,9 @@ class DshProcess(
         manifest.launchEnv.forEach { (k, v) -> env[k] = expand(v) }
         if (!guestEnvPlaced) env.putAll(effectiveGuestEnv)
         var rootActive = false
-        if (rootLaunch) {
+        if (rootLaunch && !RootLaunch.authorized()) {
+            listener.onLog("[dsh-app] root fallback: su did not grant root; using the compatible launch", "system")
+        } else if (rootLaunch) {
             val rootPlan = RootLaunch.plan(rootfs, context.filesDir, argv)
             if (rootPlan == null) {
                 listener.onLog("[dsh-app] root fallback: the launch command has no env to split; using the compatible launch", "system")

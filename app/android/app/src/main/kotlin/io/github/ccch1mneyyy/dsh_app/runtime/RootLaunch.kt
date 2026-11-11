@@ -11,17 +11,6 @@ import java.util.concurrent.TimeUnit
  * user action calls it — never a start, never a status refresh.
  */
 object RootLaunch {
-    /** Where root managers install their `su`. */
-    private val SU_PATHS = listOf(
-        "/system/bin/su",
-        "/system/xbin/su",
-        "/sbin/su",
-        "/su/bin/su",
-        "/data/adb/ksu/bin/su",
-        "/data/adb/ap/bin/su",
-        "/debug_ramdisk/su",
-    )
-
     /** A ready root launch: the generated script and the directory the guest is mounted on. */
     data class Plan(val script: File, val mount: File)
 
@@ -108,7 +97,6 @@ object RootLaunch {
     /** Wire values are part of the status map; keep them stable. */
     enum class State(val wire: String) {
         UNKNOWN("unknown"),
-        UNAVAILABLE("unavailable"),
         AUTHORIZED("authorized"),
         DENIED("denied"),
         TIMEOUT("timeout"),
@@ -119,17 +107,29 @@ object RootLaunch {
     /** Longer than any reasonable authorization dialog: the person has to read and tap. */
     private const val PROBE_TIMEOUT_MS = 30_000L
     private const val TEARDOWN_TIMEOUT_MS = 5_000L
+    /** A short yes/no before a start; an authorization dialog caches its grant after the first. */
+    private const val AUTHORIZE_TIMEOUT_MS = 10_000L
     private const val MAX_DETAIL = 200
 
-    /** A root manager is installed. Says nothing about whether it is authorized. */
-    fun detected(): Boolean = SU_PATHS.any { File(it).exists() }
+    /**
+     * Whether `su` grants root right now. Used before a root start as the one honest check:
+     * a hiding manager answers this even when no file on disk can be found. Exit status only —
+     * no output to read, so a granted `su` can never block on a full pipe.
+     */
+    fun authorized(timeoutMs: Long = AUTHORIZE_TIMEOUT_MS): Boolean = try {
+        val process = ProcessBuilder("su", "-c", "true").redirectErrorStream(true).start()
+        val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+        if (!finished) process.destroyForcibly()
+        finished && process.exitValue() == 0
+    } catch (_: Exception) {
+        false
+    }
 
     /**
      * Asks the root manager for uid 0. Blocks until the person answers, the process exits,
      * or [PROBE_TIMEOUT_MS] passes; callers must not run it on the main thread.
      */
     fun probe(): Probe {
-        if (!detected()) return Probe(State.UNAVAILABLE)
         val process = try {
             ProcessBuilder("su", "-c", "id -u").redirectErrorStream(true).start()
         } catch (error: Exception) {

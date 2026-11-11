@@ -109,8 +109,7 @@ class _LaunchModePageState extends ConsumerState<LaunchModePage> {
             SettingsTile(
               title: _rootStateLabel(l10n, status.rootState),
               subtitle: status.rootDetail,
-              trailing: Text(status.rootAvailable ? l10n.launchModeRootDetected : l10n.launchModeRootNotDetected),
-              onTap: editable && status.rootAvailable ? _probeRoot : null,
+              onTap: editable ? _probeRoot : null,
             ),
             if (status.rootCopy != 'missing')
               SettingsTile(

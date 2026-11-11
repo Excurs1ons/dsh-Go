@@ -173,7 +173,6 @@ class RuntimeStatus {
     this.launchFailureReason,
     this.tidyingFiles = false,
     this.launchMode = 'auto',
-    this.rootAvailable = false,
     this.rootState = 'unknown',
     this.rootDetail,
     this.rootCopy = 'missing',
@@ -249,9 +248,6 @@ class RuntimeStatus {
   /// Selected start path: `auto`, `compat`, `direct`, `root` or `shizuku`.
   final String launchMode;
 
-  /// A root manager is installed on this phone. Says nothing about authorization.
-  final bool rootAvailable;
-
   /// Last explicit root authorization probe: `unknown`, `unavailable`, `authorized`,
   /// `denied` or `timeout`. Only an explicit probe moves it.
   final String rootState;
@@ -324,7 +320,6 @@ class RuntimeStatus {
     launchFailureReason: map['launchFailureReason'] as String?,
     tidyingFiles: map['tidyingFiles'] == true,
     launchMode: map['launchMode'] as String? ?? 'auto',
-    rootAvailable: map['rootAvailable'] == true,
     rootState: map['rootState'] as String? ?? 'unknown',
     rootDetail: map['rootDetail'] as String?,
     rootCopy: map['rootCopy'] as String? ?? 'missing',
