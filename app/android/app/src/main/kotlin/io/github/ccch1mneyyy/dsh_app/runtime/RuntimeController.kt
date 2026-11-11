@@ -57,6 +57,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     @Volatile private var lastLaunch: LaunchDiagnostics? = null
     /** The start in progress is turning PRoot's fake hard links into real files (see [L2sMigration]). */
     @Volatile private var tidyingFiles = false
+    /** Last explicit root authorization probe; null until the person asks for one. */
+    @Volatile private var rootProbe: RootLaunch.Probe? = null
 
     @Volatile var phase: Phase = Phase.NOT_INSTALLED
         private set
@@ -145,6 +147,11 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         "healthyAt" to healthyAt,
         "networkBlocked" to networkAccess.isBlocked,
         "networkBlockedAt" to networkAccess.blockedAt,
+        "launchMode" to launchMode().wire,
+        "rootAvailable" to RootLaunch.detected(),
+        "rootState" to (rootProbe?.state ?: RootLaunch.State.UNKNOWN).wire,
+        "rootDetail" to rootProbe?.detail,
+        "rootCopy" to rootCopyState().wire,
         "directEngineEnabled" to directEngine().enabled,
         "directEngineAvailable" to directEngineAvailable(),
         "directEngineActive" to (process?.executionMode == "direct"),
@@ -174,6 +181,76 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before changing its launch method" }
         check(!enabled || directEngineAvailable()) { "this bundled runtime does not support direct launch" }
         prefs.edit().putBoolean(K_DIRECT_ENGINE, enabled).remove(K_DIRECT_FAILED).apply()
+        emitStatus()
+    }
+
+    /** The chosen start path; [LaunchMode.AUTO] is the historical behaviour. */
+    fun launchMode(): LaunchMode = LaunchMode.parse(prefs.getString(K_LAUNCH_MODE, null))
+
+    /**
+     * Records the start path for the next start. Like the Direct switch this is a
+     * launch-time decision: a running process never changes its execution world.
+     */
+    @Synchronized fun setLaunchMode(mode: String) {
+        val parsed = LaunchMode.entries.firstOrNull { it.wire == mode }
+            ?: throw IllegalArgumentException("unknown launch mode: $mode")
+        check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before changing its launch method" }
+        prefs.edit().putString(K_LAUNCH_MODE, parsed.wire).apply()
+        emitStatus()
+    }
+
+    /**
+     * Runs the root authorization probe off the main thread; `su` may be waiting for a
+     * dialog, so the answer arrives through [onDone] and is kept for the status map.
+     */
+    fun probeRoot(onDone: (RootLaunch.Probe) -> Unit) {
+        if (!RootLaunch.detected()) {
+            onDone(RootLaunch.Probe(RootLaunch.State.UNAVAILABLE))
+            return
+        }
+        Thread({
+            val probe = RootLaunch.probe()
+            rootProbe = probe
+            emitStatus()
+            main.post { onDone(probe) }
+        }, "dsh-root-probe").apply { isDaemon = true }.start()
+    }
+
+    /** Root mode's own system copy; MISSING until the person asks for one (see [RootRuntime]). */
+    fun rootCopyState(): RootRuntime.State = RootRuntime.state(app, runCatching { manifest.runtimeVersion }.getOrNull())
+
+    /**
+     * Copies the current system into root mode's own tree. A whole filesystem takes minutes,
+     * so it runs on its own thread, rejects a start in progress, and logs its progress
+     * instead of reporting every entry.
+     */
+    @Synchronized fun createRootCopy(onDone: (Throwable?) -> Unit) {
+        check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before copying the system" }
+        check(installer.rootfs.isDirectory) { "the system is not installed yet" }
+        val version = manifest.runtimeVersion
+        Thread({
+            try {
+                var reported = 0
+                RootRuntime.create(app, installer.rootfs, version) { copied, total ->
+                    if (total > 0 && copied - reported >= total / 10) {
+                        reported = copied
+                        note("[dsh-app] root system copy: $copied/$total files")
+                    }
+                }
+                note("[dsh-app] root system copy ready")
+                emitStatus()
+                main.post { onDone(null) }
+            } catch (error: Throwable) {
+                note("[dsh-app] root system copy failed: ${error.message}")
+                main.post { onDone(error) }
+            }
+        }, "dsh-root-copy").apply { isDaemon = true }.start()
+    }
+
+    /** Frees root mode's separate system; the PRoot tree is never touched. */
+    @Synchronized fun deleteRootCopy() {
+        check(process == null && phase !in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING, Phase.INSTALLING) && !resetting) { "stop the engine before deleting the root system" }
+        RootRuntime.delete(app)
         emitStatus()
     }
 
@@ -1113,6 +1190,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         private const val K_AUTO_SAFE = "autoSafe"
         private const val K_WORKSPACE_RECOVERY = "workspaceRecovery"
         private const val K_DIRECT_ENGINE = "directEngine"
+        private const val K_LAUNCH_MODE = "launchMode"
         /** Runtime version Direct failed to launch with (see [SafePolicy.directLaunchFailed]). */
         private const val K_DIRECT_FAILED = "directEngineFailedRuntime"
         private const val MAIN_FAILURE_LOG = "failure-normal.log"

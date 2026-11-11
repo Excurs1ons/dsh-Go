@@ -160,6 +160,36 @@ class RuntimePlugin :
                     result.error("launch_method_unavailable", error.message, null)
                 }
             }
+            "setLaunchMode" -> {
+                try {
+                    controller.setLaunchMode(call.argument<String>("mode") ?: "")
+                    result.success(null)
+                } catch (error: IllegalStateException) {
+                    result.error("launch_method_unavailable", error.message, null)
+                } catch (error: IllegalArgumentException) {
+                    result.error("launch_mode_invalid", error.message, null)
+                }
+            }
+            "probeRoot" -> controller.probeRoot { probe ->
+                result.success(mapOf("state" to probe.state.wire, "detail" to probe.detail))
+            }
+            "createRootCopy" -> {
+                try {
+                    controller.createRootCopy { error ->
+                        if (error == null) result.success(null) else result.error("root_copy_failed", error.message, null)
+                    }
+                } catch (error: IllegalStateException) {
+                    result.error("launch_method_unavailable", error.message, null)
+                }
+            }
+            "deleteRootCopy" -> {
+                try {
+                    controller.deleteRootCopy()
+                    result.success(null)
+                } catch (error: IllegalStateException) {
+                    result.error("launch_method_unavailable", error.message, null)
+                }
+            }
             "failureLog" -> result.success(controller.failureLog())
             "batteryExempt" -> {
                 val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager

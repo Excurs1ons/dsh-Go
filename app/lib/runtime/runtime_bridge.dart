@@ -172,6 +172,11 @@ class RuntimeStatus {
     this.launchSpawned = false,
     this.launchFailureReason,
     this.tidyingFiles = false,
+    this.launchMode = 'auto',
+    this.rootAvailable = false,
+    this.rootState = 'unknown',
+    this.rootDetail,
+    this.rootCopy = 'missing',
   });
 
   const RuntimeStatus.unknown() : this(phase: RuntimePhase.notInstalled);
@@ -241,6 +246,20 @@ class RuntimeStatus {
   /// files for more than a moment (once per install, before Direct launch).
   final bool tidyingFiles;
 
+  /// Selected start path: `auto`, `compat`, `direct`, `root` or `shizuku`.
+  final String launchMode;
+
+  /// A root manager is installed on this phone. Says nothing about authorization.
+  final bool rootAvailable;
+
+  /// Last explicit root authorization probe: `unknown`, `unavailable`, `authorized`,
+  /// `denied` or `timeout`. Only an explicit probe moves it.
+  final String rootState;
+  final String? rootDetail;
+
+  /// Root mode's own system copy: `missing`, `copying`, `ready` or `stale`.
+  final String rootCopy;
+
   Map<String, Object?> get launchDiagnostics => {
     'directEngineEnabled': directEngineEnabled,
     'directEngineAvailable': directEngineAvailable,
@@ -304,6 +323,11 @@ class RuntimeStatus {
     launchSpawned: map['launchSpawned'] == true,
     launchFailureReason: map['launchFailureReason'] as String?,
     tidyingFiles: map['tidyingFiles'] == true,
+    launchMode: map['launchMode'] as String? ?? 'auto',
+    rootAvailable: map['rootAvailable'] == true,
+    rootState: map['rootState'] as String? ?? 'unknown',
+    rootDetail: map['rootDetail'] as String?,
+    rootCopy: map['rootCopy'] as String? ?? 'missing',
   );
 }
 
@@ -618,6 +642,22 @@ class RuntimeBridge {
 
   /// Takes effect on the next start; native code rejects changes while active.
   Future<void> setDirectEngine(bool enabled) => _methods.invokeMethod<void>('setDirectEngine', {'enabled': enabled});
+
+  /// Selects the start path (`auto`, `compat`, `direct`, `root`, `shizuku`).
+  /// Applies to the next start; native code rejects changes while the engine runs.
+  Future<void> setLaunchMode(String mode) => _methods.invokeMethod<void>('setLaunchMode', {'mode': mode});
+
+  /// Asks the root manager for uid 0. Shows its authorization dialog; the answer
+  /// arrives as `{state, detail}` and is kept in the status afterwards.
+  Future<Map<String, Object?>> probeRoot() async =>
+      await _methods.invokeMapMethod<Object?, Object?>('probeRoot') ?? const {};
+
+  /// Copies the current system into root mode's own tree. Takes minutes and
+  /// replaces an existing copy, so callers confirm first and the engine stops.
+  Future<void> createRootCopy() => _methods.invokeMethod<void>('createRootCopy');
+
+  /// Frees root mode's system copy; the PRoot tree is untouched.
+  Future<void> deleteRootCopy() => _methods.invokeMethod<void>('deleteRootCopy');
 
   /// Output around the last failure, tokens masked.
   Future<List<String>> failureLog() async => (await _methods.invokeListMethod<String>('failureLog')) ?? const [];

@@ -6,6 +6,7 @@ import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../common/brief_notice.dart';
 import 'settings_widgets.dart';
+import 'launch_mode_page.dart';
 
 /// Direct launch, on by default; a change applies only after a deliberate
 /// engine stop/start.
@@ -48,6 +49,7 @@ class _DirectEngineSettingsState extends ConsumerState<DirectEngineSettings> {
     return SettingsSection(
       title: l10n.phoneDeveloperOptions,
       children: [
+        const LaunchModeTile(),
         // Only after a direct launch failed: a fallback already runs compatibly
         // and the switch's hint says so.
         if (status.directEngineEnabled && status.launchSelectedMode == 'direct' && status.launchFailureReason != null)

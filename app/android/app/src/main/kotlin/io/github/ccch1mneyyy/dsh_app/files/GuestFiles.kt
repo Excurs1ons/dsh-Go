@@ -2,6 +2,7 @@ package io.github.ccch1mneyyy.dsh_app.files
 
 import android.content.Context
 import io.github.ccch1mneyyy.dsh_app.runtime.PhoneStorage
+import io.github.ccch1mneyyy.dsh_app.runtime.RootRuntime
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.LinkOption
@@ -19,7 +20,8 @@ import java.nio.file.LinkOption
 object GuestFiles {
     private const val MAX_LINKS = 16
 
-    fun rootfs(context: Context): File = File(context.filesDir, "runtime/rootfs")
+    /** The tree the running guest sees: root mode's own copy while it runs, PRoot's otherwise. */
+    fun rootfs(context: Context): File = RootRuntime.active(context)
 
     /** Host file for an absolute guest [path]; null when it is not a readable regular file. */
     fun resolve(context: Context, path: String): File? =
