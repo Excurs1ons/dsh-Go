@@ -1,0 +1,126 @@
+# Builds installable APKs on demand. The runtime is assembled from source first:
+# `runtime/build-runtime.sh` needs an x86_64 host and never runs foreign code, so
+# this workflow cannot run on arm64 runners.
+#
+#   Actions → Build APK → Run workflow → flavor arm64, mode release
+#
+# A release build verifies the runtime bundle (tooling/check_runtime_bundle.py)
+# before Gradle starts, so a half-assembled runtime fails here rather than in a
+# broken APK. Artifacts: the APK, and the runtime it was built from (expensive
+# to rebuild, and the only way to reproduce the exact APK later).
+name: Build APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: 'ABI flavor'
+        required: true
+        default: 'arm64'
+        type: choice
+        options: [arm64, x64]
+      mode:
+        description: 'Build mode'
+        required: true
+        default: 'release'
+        type: choice
+        options: [release, debug]
+      build_name:
+        description: 'version name (blank = app/pubspec.yaml)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+  DSH_MAVEN_MIRRORS: 0 # The Aliyun mirrors are slow and unreliable from a US runner.
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04 # x86_64: the runtime build never executes foreign-architecture code.
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # gpgv verifies the Ubuntu archive keyring the runtime build resolves packages against.
+      - name: Host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends curl xz-utils gpgv tar
+
+      # The repository's own toolchain installer: JDK 17, Flutter, Android SDK and NDK.
+      - name: Toolchain
+        run: tooling/setup-toolchain.sh
+
+      - name: Resolve runtime ABI
+        id: abi
+        run: |
+          case "${{ inputs.flavor }}" in
+            arm64) echo "abi=arm64-v8a" >> "$GITHUB_OUTPUT" ;;
+            x64) echo "abi=x86_64" >> "$GITHUB_OUTPUT" ;;
+            *) echo "unknown flavor: ${{ inputs.flavor }}" >&2; exit 1 ;;
+          esac
+
+      - name: Build runtime
+        run: |
+          source tooling/env.sh
+          runtime/build-runtime.sh "${{ steps.abi.outputs.abi }}"
+
+      - name: Flutter plugins and local.properties
+        working-directory: app
+        run: |
+          source ../tooling/env.sh
+          flutter pub get --enforce-lockfile
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+
+      - name: Build APK
+        run: |
+          source tooling/env.sh
+          args=(-f "${{ inputs.flavor }}" --${{ inputs.mode }})
+          if [[ -n "${{ inputs.build_name }}" ]]; then
+            args+=(--build-name "${{ inputs.build_name }}")
+          fi
+          tooling/build-apk.sh "${args[@]}"
+
+      - name: Collect APK
+        run: |
+          ls -lh app/build/app/outputs/flutter-apk/
+          echo "apk=app/build/app/outputs/flutter-apk/app-${{ inputs.flavor }}-${{ inputs.mode }}.apk" >> "$GITHUB_ENV"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dsh-go-${{ inputs.flavor }}-${{ inputs.mode }}-${{ github.run_number }}
+          path: ${{ env.apk }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload runtime
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-${{ steps.abi.outputs.abi }}-${{ github.run_number }}
+          path: |
+            runtime/out/${{ steps.abi.outputs.abi }}/
+            runtime/out/manifest.json
+          if-no-files-found: error
+          retention-days: 14
